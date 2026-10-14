@@ -33,10 +33,10 @@ EXCHANGE_URL = "https://glados.cloud/api/user/exchange"
 HEADERS_BASE = {
     "origin": "https://glados.cloud",
     "referer": "https://glados.cloud/console/checkin",
-    "user-agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "user-agent": os.getenv("GLADOS_USER_AGENT", "").strip() or (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
+        "Chrome/155.0.0.0 Safari/537.36"
     ),
     # 注意：使用 requests 的 json= 参数时会自动设置 Content-Type: application/json，
     # 此处无需（也不应）手动设置 content-type，否则与 requests 默认行为重复。
@@ -567,13 +567,15 @@ def push_all(title: str, content: str) -> Tuple[int, int]:
 # ==================== 签到逻辑 ====================
 def classify_checkin(code: Any, message: str) -> str:
     """
-    判断签到结果: ok / repeat / fail
-    GLaDOS API: code=0 成功, code=1 已签到, 其他失败
+    判断签到结果: ok / repeat / blocked / fail。
+    code=4 是服务端自动化拦截，必须优先于文案中的重复签到关键词。
     """
     try:
         code = int(code)
     except (TypeError, ValueError):
         code = -2
+    if code == 4 or "automated check-in detected" in (message or "").lower():
+        return "blocked"
     if code == 0:
         return "ok"
     if code == 1:
@@ -649,12 +651,21 @@ def checkin_account(
         message = j.get("message", "")
         # H1：GLaDOS 不返回 points 字段，从 message 文本解析本次获得积分
         earned = parse_earned_points(message)
+        logger.info("账号 %d 签到响应: code=%s, message=%s", index, code, message)
         result = classify_checkin(code, message)
 
         if result == "ok":
             status = f"✅ 成功 (+{earned}积分)"
         elif result == "repeat":
             status = "🔄 已签到"
+        elif result == "blocked":
+            status = f"❌ 自动化请求被拒绝(code={code}, {message})"
+            logger.error(
+                "账号 %d 自动化请求被服务端拒绝 (code=%s)。"
+                "此结果不等于 Cookie 失效；若网页正常但脚本被拒绝，"
+                "需联系站点确认允许的自动签到方式。不会重试业务拒绝或标记为成功。",
+                index, code,
+            )
         else:
             # 区分「服务端鉴权失败」与「其它业务失败」：鉴权失败通常是 Cookie 过期/
             # 复制不完整，需要给出「重新获取 Cookie」的可操作提示，避免与格式问题混淆。

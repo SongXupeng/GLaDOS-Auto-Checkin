@@ -1,4 +1,5 @@
 import unittest
+import importlib
 from unittest.mock import Mock, patch
 
 import checkin
@@ -17,18 +18,29 @@ class CheckinTests(unittest.TestCase):
     def test_normal_results(self):
         self.assertEqual(checkin.classify_checkin(0, "Checkin! Got 5 Points"), "ok")
         self.assertEqual(checkin.classify_checkin(1, "already checked in"), "repeat")
+        self.assertEqual(checkin.classify_checkin(1, "Today's observation logged. Return tomorrow for more points."), "repeat")
         self.assertEqual(checkin.classify_checkin(-2, "没有权限"), "fail")
 
-    def test_request_matches_web_json_without_mutating_headers(self):
+    def test_user_agent_can_follow_the_login_browser(self):
+        try:
+            with patch.dict(checkin.os.environ, {"GLADOS_USER_AGENT": "  login-browser-agent  "}):
+                importlib.reload(checkin)
+                self.assertEqual(checkin.HEADERS_BASE["user-agent"], "login-browser-agent")
+            with patch.dict(checkin.os.environ, {"GLADOS_USER_AGENT": "  "}):
+                importlib.reload(checkin)
+                self.assertIn("Chrome/155.0.0.0", checkin.HEADERS_BASE["user-agent"])
+        finally:
+            importlib.reload(checkin)
+
+    def test_request_preserves_the_cookie_and_json_payload(self):
         session = Mock()
         session.post.return_value.json.return_value = {"code": 0, "points": 5}
         headers = {"cookie": "test-only", "user-agent": "configured-agent"}
         checkin.checkin_request(session, headers)
         args, kwargs = session.post.call_args
         self.assertEqual(args, (checkin.CHECKIN_URL,))
-        self.assertEqual(kwargs["data"], b'{"token":"glados.cloud"}')
+        self.assertEqual(kwargs["json"], {"token": "glados.cloud"})
         self.assertEqual(kwargs["headers"]["cookie"], "test-only")
-        self.assertEqual(kwargs["headers"]["content-type"], "application/json;charset=UTF-8")
         self.assertNotIn("content-type", headers)
 
     def test_blocked_account_remains_failed_even_when_status_works(self):

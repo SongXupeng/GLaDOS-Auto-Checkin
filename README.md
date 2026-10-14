@@ -154,6 +154,14 @@ cookie_账号3
 
 ## ❓ 常见问题
 
+**Q: 网页签到正常，但 Actions 返回 `Automated check-in detected` / `code=4`？**
+
+A: 这是签到接口的自动化检测结果，不代表 Cookie 一定过期。本仓库旧版本将 User-Agent 固定为 Windows / Chrome 120；2026-10-14 使用同一组 Cookie 对照验证：旧标识返回 `code=4`，仅更新为当前登录浏览器的 macOS / Chrome 155 标识后，接口返回 `code=1`（今日已签到）。仅调整 JSON 空格仍失败，因此保留原来的 `json=` 提交方式。
+
+当前默认 User-Agent 已更新。直接在本地运行时，可通过环境变量 `GLADOS_USER_AGENT` 配置登录浏览器的 User-Agent；自定义 Actions 时需在 `Run checkin` 的 `env` 中显式传入该变量，仅添加仓库 Variable 不会自动传入 Python。站点策略仍可能变化，当前验证的是当日已签到响应，不能保证未来持续可用。
+
+`code=4` 将单独记录为自动化请求被拒绝，不会重试业务拒绝，也不会将其当作已签到。若使用当前标识后依然返回此错误，请先确认网页端状态，并联系站点支持确认允许的自动签到方式。
+
 **Q: 签到提示「没有权限」/ 鉴权失败？**
 
 A: 说明 Cookie 已失效或复制不完整，**请重新登录 GLaDOS 获取最新 Cookie 并更新 Secrets 中的 `COOKIES`**。

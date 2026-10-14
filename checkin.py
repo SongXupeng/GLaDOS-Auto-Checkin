@@ -33,14 +33,13 @@ EXCHANGE_URL = "https://glados.cloud/api/user/exchange"
 HEADERS_BASE = {
     "origin": "https://glados.cloud",
     "referer": "https://glados.cloud/console/checkin",
-    "accept": "application/json, text/plain, */*",
-    "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
     "user-agent": os.getenv("GLADOS_USER_AGENT", "").strip() or (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/155.0.0.0 Safari/537.36"
     ),
-    # 签到请求单独设置 JSON Content-Type，不影响使用表单的积分兑换。
+    # 注意：使用 requests 的 json= 参数时会自动设置 Content-Type: application/json，
+    # 此处无需（也不应）手动设置 content-type，否则与 requests 默认行为重复。
 }
 PAYLOAD = {"token": "glados.cloud"}
 TIMEOUT = (5, 15)  # (连接超时, 读取超时)
@@ -593,12 +592,7 @@ def classify_checkin(code: Any, message: str) -> str:
 @retry_on_failure()
 def checkin_request(session: requests.Session, headers: Dict[str, str]) -> Dict[str, Any]:
     """执行签到请求（带重试）"""
-    r = session.post(
-        CHECKIN_URL,
-        headers={**headers, "content-type": "application/json;charset=UTF-8"},
-        data=json.dumps(PAYLOAD, separators=(",", ":")).encode("utf-8"),
-        timeout=TIMEOUT,
-    )
+    r = session.post(CHECKIN_URL, headers=headers, json=PAYLOAD, timeout=TIMEOUT)
     r.raise_for_status()
     return require_json(r)  # 非 JSON 响应抛异常进入重试（M1）
 
@@ -657,6 +651,7 @@ def checkin_account(
         message = j.get("message", "")
         # H1：GLaDOS 不返回 points 字段，从 message 文本解析本次获得积分
         earned = parse_earned_points(message)
+        logger.info("账号 %d 签到响应: code=%s, message=%s", index, code, message)
         result = classify_checkin(code, message)
 
         if result == "ok":

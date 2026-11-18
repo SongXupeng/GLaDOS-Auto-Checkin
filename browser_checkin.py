@@ -50,6 +50,7 @@ def main():
             raise
         # Temporary probe only; final runtime installation belongs in the workflow.
         import subprocess
+        os.environ.setdefault("PLAYWRIGHT_HOST_PLATFORM_OVERRIDE", "ubuntu24.04-x64")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "patchright==1.60.1"])
         subprocess.check_call([sys.executable, "-m", "patchright", "install", "chromium"])
         from patchright.sync_api import sync_playwright, TimeoutError as BrowserTimeout

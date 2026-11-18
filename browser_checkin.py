@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import sys
+import time
 from urllib.parse import urlsplit
 
 logger = logging.getLogger("glados-browser")
@@ -40,6 +41,42 @@ def accepted_result(result):
     if "verification failed" in message.lower() or "automated check-in detected" in message.lower():
         return False
     return code in (0, 1)
+
+
+def already_recorded(button_text):
+    return bool(re.search(r"got\s+\d+\s+points?", button_text, re.I))
+
+
+def activate_verification_checkbox(page):
+    """Use the named, enabled verification checkbox in Cloudflare's own frame."""
+    for frame in page.frames:
+        if urlsplit(frame.url).hostname != "challenges.cloudflare.com":
+            continue
+        client = None
+        try:
+            client = page.context.new_cdp_session(frame)
+            nodes = client.send("Accessibility.getFullAXTree")["nodes"]
+            for node in nodes:
+                if node.get("role", {}).get("value") != "checkbox":
+                    continue
+                label = node.get("name", {}).get("value", "").lower()
+                if not any(word in label for word in ("human", "verify", "真人", "验证")):
+                    continue
+                properties = {p["name"]: p.get("value", {}).get("value") for p in node.get("properties", [])}
+                if properties.get("disabled") or properties.get("checked") in (True, "true"):
+                    continue
+                target = node.get("backendDOMNodeId")
+                if target:
+                    client.send("DOM.focus", {"backendNodeId": target})
+                    page.keyboard.press("Space")
+                    logger.info("已操作官网 Cloudflare 标准验证框")
+                    return True
+        except Exception:
+            continue
+        finally:
+            if client:
+                client.detach()
+    return False
 
 
 def main():
@@ -85,13 +122,20 @@ def main():
                 return 1
             required = bool(challenge.get("turnstile"))
             logger.info("官网 challenge 已加载，Turnstile required=%s", required)
-            button = page.get_by_role("button", name="Checkin", exact=True)
+            button = page.get_by_role("button", name=re.compile("checkin", re.I)).first
             button.wait_for(state="visible", timeout=45000)
+            if already_recorded(button.inner_text()):
+                logger.info("今日已签到（官网已显示获得积分）")
+                return 0
             button.scroll_into_view_if_needed()
             if required:
-                try:
-                    page.wait_for_function(TOKEN_READY, timeout=60000)
-                except BrowserTimeout:
+                deadline = time.monotonic() + 60
+                interacted = False
+                while time.monotonic() < deadline and not page.evaluate(TOKEN_READY):
+                    if not interacted:
+                        interacted = activate_verification_checkbox(page)
+                    page.wait_for_timeout(500)
+                if not page.evaluate(TOKEN_READY):
                     logger.error("Cloudflare 未完成自动验证，未提交签到。组件错误码=%s", sorted(codes))
                     return 1
                 logger.info("官网已完成 Cloudflare 验证")

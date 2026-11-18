@@ -1,11 +1,17 @@
 """Use the official page to check in; stop if interactive verification is required."""
 import logging
 import os
+import re
 import sys
 from urllib.parse import urlsplit
 
 logger = logging.getLogger("glados-browser")
 ORIGIN = "https://glados.cloud"
+TOKEN_READY = """() => {
+    try { if (window.turnstile && window.turnstile.getResponse()) return true; } catch (_) {}
+    return [...document.querySelectorAll('input[name="cf-turnstile-response"]')]
+        .some(node => node.value.length > 0);
+}"""
 
 
 def session_cookies(raw):
@@ -37,7 +43,7 @@ def accepted_result(result):
 
 
 def main():
-    from playwright.sync_api import sync_playwright, TimeoutError as BrowserTimeout
+    from patchright.sync_api import sync_playwright, TimeoutError as BrowserTimeout
 
     expected = os.getenv("GLADOS_EXPECTED_EMAIL", "").strip()
     if not expected:
@@ -50,14 +56,35 @@ def main():
             context = browser.new_context(locale="en-US")
             context.add_cookies(cookies)
             page = context.new_page()
-            page.goto(ORIGIN + "/console/checkin", wait_until="domcontentloaded", timeout=60000)
+            codes = set()
+            def record_console(message):
+                codes.update(re.findall(r"Turnstile\][^\d]{0,40}(\d{6})", message.text))
+            page.on("console", record_console)
             response = context.request.get(ORIGIN + "/api/user/status", timeout=30000)
             if not response.ok:
                 raise ValueError("账号查询失败 HTTP %s" % response.status)
             data = verify_identity(response.json(), expected)
             logger.info("已确认指定 Gmail 账号登录，剩余天数=%s", data.get("leftDays", "-"))
+            with page.expect_event("requestfinished", predicate=lambda r:
+                    urlsplit(r.url).path == "/api/user/checkin/challenge" and r.method == "GET",
+                    timeout=60000) as loaded:
+                page.goto(ORIGIN + "/console/checkin", wait_until="domcontentloaded", timeout=60000)
+            challenge = loaded.value.response().json()
+            if challenge.get("code") != 0 or not challenge.get("nonce"):
+                logger.error("官网 challenge 加载失败，未提交签到")
+                return 1
+            required = bool(challenge.get("turnstile"))
+            logger.info("官网 challenge 已加载，Turnstile required=%s", required)
             button = page.get_by_role("button", name="Checkin", exact=True)
             button.wait_for(state="visible", timeout=45000)
+            button.scroll_into_view_if_needed()
+            if required:
+                try:
+                    page.wait_for_function(TOKEN_READY, timeout=60000)
+                except BrowserTimeout:
+                    logger.error("Cloudflare 未完成自动验证，未提交签到。组件错误码=%s", sorted(codes))
+                    return 1
+                logger.info("官网已完成 Cloudflare 验证")
             try:
                 with page.expect_response(
                     lambda r: urlsplit(r.url).path == "/api/user/checkin" and r.request.method == "POST",

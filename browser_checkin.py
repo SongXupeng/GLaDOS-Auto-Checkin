@@ -43,7 +43,16 @@ def accepted_result(result):
 
 
 def main():
-    from patchright.sync_api import sync_playwright, TimeoutError as BrowserTimeout
+    try:
+        from patchright.sync_api import sync_playwright, TimeoutError as BrowserTimeout
+    except ImportError:
+        if os.getenv("GITHUB_REF_NAME") != "codex/gmail-browser-checkin-20261118":
+            raise
+        # Temporary probe only; final runtime installation belongs in the workflow.
+        import subprocess
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "patchright==1.60.1"])
+        subprocess.check_call([sys.executable, "-m", "patchright", "install", "chromium"])
+        from patchright.sync_api import sync_playwright, TimeoutError as BrowserTimeout
 
     expected = os.getenv("GLADOS_EXPECTED_EMAIL", "").strip()
     if not expected:

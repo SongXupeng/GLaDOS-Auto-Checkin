@@ -6,7 +6,7 @@ The check-in identity comes from the GLaDOS session, not a hardcoded email in th
 - `GLADOS_EXPECTED_EMAIL` (Actions repository Variable): the intended account email. The browser checks `/api/user/status` and stops before check-in if the identity differs or authentication fails.
 - No Gmail password, IMAP access, or authentication email access is needed. When the session expires, log in to GLaDOS and replace the Cookie Secret.
 
-`browser_checkin.py` opens the official page in standard Chromium and clicks its Checkin button. The website generates its own request. The script does not click CAPTCHA checkboxes, solve image challenges, forge verification tokens, or replay a request whose outcome is unknown. Interactive verification or an unexpected response fails the run.
+`browser_checkin.py` opens the official page in the Chromium runtime supplied by Patchright 1.60.1, following the upstream browser implementation. It waits for the page's challenge request to finish and, when required, for the website's verification token to become ready before clicking Checkin. The website generates its own request. The script does not click CAPTCHA checkboxes, solve image challenges, forge verification tokens, or replay a request whose outcome is unknown. Interactive verification or an unexpected response fails the run.
 
 Only API business responses `code=0` (new check-in) and `code=1` (already recorded) count as success. Known verification-error messages still fail even if paired with those codes. Points exchange is not performed by the browser runner.
 

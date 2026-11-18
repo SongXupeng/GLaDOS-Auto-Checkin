@@ -28,12 +28,18 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install "requests==2.32.3" --no-cache-dir
+        run: |
+          pip install "requests==2.32.3" "playwright==1.65.2" --no-cache-dir
+          python -m playwright install --with-deps chromium
+
+      - name: Verify account protection
+        run: python -m unittest discover -s tests -v
 
       - name: Run checkin
-        run: python checkin.py
+        run: xvfb-run -a python browser_checkin.py
         env:
           COOKIES: ${{ secrets.COOKIES || vars.COOKIES }}
+          GLADOS_EXPECTED_EMAIL: ${{ vars.GLADOS_EXPECTED_EMAIL }}
           SENDKEY: ${{ secrets.SENDKEY }}
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
